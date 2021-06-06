@@ -5,7 +5,8 @@ import pygame
 import os
 import random
 import sys
-
+import neat
+import math
 from pygame import image
 
 
@@ -56,6 +57,7 @@ class Dino:
         self.jump_vel = self.JUMP_VEL
         self.rect = pygame.Rect(self.X_POS, self.Y_POS,
                                 img.get_width(), img.get_height())
+        self.color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
         self.step_index = 0
 
     def update(self):
@@ -84,6 +86,9 @@ class Dino:
 
     def draw(self, SCREEN):
         SCREEN.blit(self.imgage, (self.rect.x, self.rect.y))
+        pygame.draw.rect(SCREEN, self.color, (self.rect.x, self.rect.y, self.rect.width, self.rect.height), 2)
+        for obstacle in obstacles:
+            pygame.draw.line(SCREEN, self.color, (self.rect.x + 54, self.rect.y + 12), obstacle.rect.center, 2)
 
 
 class Obstacle:
@@ -119,20 +124,36 @@ class LargeCactus(Obstacle):
 
 def remove(index):
     dinos.pop(index)
+    ge.pop(index)
+    nets.pop(index)
 
 
-def main():
-    global game_speed, x_pos_bg, y_pos_bg, obstacles, dinos,  points
+def distance(pos_a, pos_b):
+    dx = pos_a[0]-pos_b[0]
+    dy = pos_a[1]-pos_b[1]
+    return math.sqrt(dx**2+dy**2)
+
+
+def eval_genomes(genomes, config):
+    global game_speed, x_pos_bg, y_pos_bg, obstacles, dinos, ge, nets, points
     clock = pygame.time.Clock()
     points = 0
 
     obstacles = []
-    # Ability to display multiple dinos for AI implementation
-    dinos = [Dino()]
+    dinos = []
+    ge = []
+    nets = []
 
     x_pos_bg = 0
     y_pos_bg = 380
     game_speed = 20
+
+    for ge_id, genome in genomes:
+        dinos.append(Dino())
+        ge.append(genome)
+        net = neat.nn.FeedForwardNetwork.create(genome, config)
+        nets.append(net)
+        genome.fitness = 0
 
     def score():
         global points, game_speed
@@ -141,6 +162,16 @@ def main():
             game_speed += 1
         text = FONT.render(f'Points: {str(points)}', True, (0, 0, 0))
         SCREEN.blit(text, (950, 50))
+
+    def stats():
+        global dinos, game_speed, ge
+        text1 = FONT.render(f'Dinosaurs alive: {str(len(dinos))}', True, (0, 0, 0))
+        text2 = FONT.render(f'Generation: {population.generation + 1}', True, (0, 0, 0))
+        text3 = FONT.render(f'Game speed: {game_speed}', True, (0, 0, 0))
+
+        SCREEN.blit(text1, (50, 450))
+        SCREEN.blit(text2, (50, 480))
+        SCREEN.blit(text3, (50, 510))
 
     def background():
         global x_pos_bg, y_pos_bg
@@ -180,25 +211,34 @@ def main():
             obstacle.update()
             for i, dinosaur in enumerate(dinos):
                 if dinosaur.rect.colliderect(obstacle.rect):
+                    ge[i].fitness -= 1
                     remove(i)
 
-        user_input = pygame.key.get_pressed()
-
         for (i, dino) in enumerate(dinos):
-            if user_input[pygame.K_SPACE]:
+            output = nets[i].activate((dino.rect.y, distance(
+                (dino.rect.x, dino.rect.y), obstacle.rect.midtop)))
+            if output[0] > 0.5 and dino.rect.y == dino.Y_POS:
                 dino.dino_jump = True
                 dino.dino_run = False
 
+        stats()
         score()
         background()
         clock.tick(30)
         pygame.display.update()
 
 
-# -----------------  Driver Code  ----------------- #
+# -----------------  Setup NEAT  ----------------- #
+
+def run(config_path):
+    global population
+    config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction, neat.DefaultSpeciesSet, neat.DefaultStagnation, config_path)
+
+    population = neat.Population(config)
+    population.run(eval_genomes, 50)
 
 
-main()
-
-
-# -----------------  xxxxxxxxx  ----------------- #
+if __name__ == '__main__':
+    local_dir = os.path.dirname(__file__)
+    config_path = os.path.join(local_dir, 'config.txt')
+    run(config_path)
